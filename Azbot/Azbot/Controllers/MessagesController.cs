@@ -165,6 +165,7 @@ namespace Azbot
             {
                 // Handle add/remove from contact lists
                 // Activity.From + Activity.Action represent what happened
+                stateClient.BotState.DeleteStateForUser(activity.ChannelId, activity.From.Id);
             }
             else if (activity.Type == ActivityTypes.Typing)
             {
