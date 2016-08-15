@@ -20,12 +20,12 @@ namespace Azbot
         /// </summary>
         public async Task<HttpResponseMessage> Post([FromBody]Activity activity)
         {
+            ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
+            StateClient stateClient = activity.GetStateClient();
+
             if (activity.Type == ActivityTypes.Message)
             {
                 string botResponse = null;
-                ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
-
-                StateClient stateClient = activity.GetStateClient();
                 BotData state = stateClient.BotState.GetPrivateConversationData(activity.ChannelId, activity.Conversation.Id, activity.From.Id);
 
                 // Check if there is any active question.
@@ -45,7 +45,7 @@ namespace Azbot
             }
             else
             {
-                HandleSystemMessage(activity);
+                HandleSystemMessage(stateClient, activity);
             }
 
             var response = Request.CreateResponse(HttpStatusCode.OK);
@@ -147,29 +147,30 @@ namespace Azbot
         }
 
 
-        private Activity HandleSystemMessage(Activity message)
+        private Activity HandleSystemMessage(StateClient stateClient, Activity activity)
         {
-            if (message.Type == ActivityTypes.DeleteUserData)
+            if (activity.Type == ActivityTypes.DeleteUserData)
             {
                 // Implement user deletion here
                 // If we handle user deletion, return a real message
+                stateClient.BotState.DeleteStateForUser(activity.ChannelId, activity.From.Id);
             }
-            else if (message.Type == ActivityTypes.ConversationUpdate)
+            else if (activity.Type == ActivityTypes.ConversationUpdate)
             {
                 // Handle conversation state changes, like members being added and removed
                 // Use Activity.MembersAdded and Activity.MembersRemoved and Activity.Action for info
                 // Not available in all channels
             }
-            else if (message.Type == ActivityTypes.ContactRelationUpdate)
+            else if (activity.Type == ActivityTypes.ContactRelationUpdate)
             {
                 // Handle add/remove from contact lists
                 // Activity.From + Activity.Action represent what happened
             }
-            else if (message.Type == ActivityTypes.Typing)
+            else if (activity.Type == ActivityTypes.Typing)
             {
                 // Handle knowing tha the user is typing
             }
-            else if (message.Type == ActivityTypes.Ping)
+            else if (activity.Type == ActivityTypes.Ping)
             {
             }
 
