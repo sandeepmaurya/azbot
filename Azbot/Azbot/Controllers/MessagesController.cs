@@ -26,7 +26,7 @@ namespace Azbot
                 ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
 
                 StateClient stateClient = activity.GetStateClient();
-                BotData state = stateClient.BotState.GetUserData(activity.ChannelId, activity.Conversation.Id);
+                BotData state = stateClient.BotState.GetPrivateConversationData(activity.ChannelId, activity.Conversation.Id, activity.From.Id);
 
                 // Check if there is any active question.
                 var activeQuestion = state.GetProperty<string>("ActiveQuestion");
@@ -68,7 +68,7 @@ namespace Azbot
                     else
                     {
                         state.SetProperty<string>("ActiveQuestion", "ServicePrincipalCredentials");
-                        stateClient.BotState.SetUserData(activity.ChannelId, activity.Conversation.Id, state);
+                        stateClient.BotState.SetPrivateConversationData(activity.ChannelId, activity.Conversation.Id, activity.From.Id, state);
                         return "Sure. Please enter your AD application client id, service principal password and tenant id separated by commas.";
                     }
                 default:
@@ -89,7 +89,7 @@ namespace Azbot
                         var response = await PrepareSubscriptionsResponse(credentials);
                         state.SetProperty<string>("ActiveQuestion", string.Empty);
                         state.SetProperty<Tuple<string, string, string>>("ServicePrincipalCredentials", credentials);
-                        stateClient.BotState.SetUserData(activity.ChannelId, activity.Conversation.Id, state);
+                        stateClient.BotState.SetPrivateConversationData(activity.ChannelId, activity.Conversation.Id, activity.From.Id, state);
                         return response;
                     }
                     catch
