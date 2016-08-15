@@ -1,9 +1,13 @@
 ﻿using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
+using System.Web;
 using System.Web.Http;
 using Microsoft.Bot.Connector;
+using Newtonsoft.Json.Linq;
 
 namespace Azbot
 {
@@ -18,19 +22,22 @@ namespace Azbot
         {
             if (activity.Type == ActivityTypes.Message)
             {
-                LuisResponse luisResponse = await LuisClient.ParseUserInput(activity.Text);
-                string botResponse = "I'm sorry. I did not understand you.";
+                string botResponse = null;
                 ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
-                switch (luisResponse.intents[0].intent)
+
+                StateClient stateClient = activity.GetStateClient();
+                BotData state = stateClient.BotState.GetUserData(activity.ChannelId, activity.Conversation.Id);
+
+                // Check if there is any active question.
+                var activeQuestion = state.GetProperty<string>("ActiveQuestion");
+                if (!string.IsNullOrWhiteSpace(activeQuestion))
                 {
-                    case "Greet":
-                        botResponse = "Hi there. How can I help you today?";
-                        break;
-                    case "ListSubscriptions":
-                        botResponse = "Sure. Please enter your AD application ClientId, service principal password and tenant id.";
-                        break;
-                    default:
-                        break;
+                    botResponse = await ProcessQuestionResponse(stateClient, state, activeQuestion, activity);
+                }
+                else
+                {
+                    // No active question. Figure out the intent of conversation.
+                    botResponse = await ProcessIntent(stateClient, state, activity);
                 }
 
                 Activity reply = activity.CreateReply(botResponse);
@@ -44,6 +51,101 @@ namespace Azbot
             var response = Request.CreateResponse(HttpStatusCode.OK);
             return response;
         }
+
+        private async Task<string> ProcessIntent(StateClient stateClient, BotData state, Activity activity)
+        {
+            LuisResponse luisResponse = await LuisClient.ParseUserInput(activity.Text);
+            switch (luisResponse.intents[0].intent)
+            {
+                case "Greet":
+                    return "Hi there. How can I help you today?";
+                case "ListSubscriptions":
+                    var servicePrincipalCredentials = state.GetProperty<Tuple<string, string, string>>("ServicePrincipalCredentials");
+                    if (servicePrincipalCredentials != null)
+                    {
+                        return await PrepareSubscriptionsResponse(servicePrincipalCredentials);
+                    }
+                    else
+                    {
+                        state.SetProperty<string>("ActiveQuestion", "ServicePrincipalCredentials");
+                        stateClient.BotState.SetUserData(activity.ChannelId, activity.Conversation.Id, state);
+                        return "Sure. Please enter your AD application client id, service principal password and tenant id separated by commas.";
+                    }
+                default:
+                    break;
+            }
+
+            return "I'm sorry. I did not understand you.";
+        }
+
+        private async Task<string> ProcessQuestionResponse(StateClient stateClient, BotData state, string activeQuestion, Activity activity)
+        {
+            switch (activeQuestion)
+            {
+                case "ServicePrincipalCredentials":
+                    try
+                    {
+                        var credentials = ExtractCredentials(activity.Text);
+                        var response = await PrepareSubscriptionsResponse(credentials);
+                        state.SetProperty<string>("ActiveQuestion", string.Empty);
+                        state.SetProperty<Tuple<string, string, string>>("ServicePrincipalCredentials", credentials);
+                        stateClient.BotState.SetUserData(activity.ChannelId, activity.Conversation.Id, state);
+                        return response;
+                    }
+                    catch
+                    {
+                        return "Please enter your AD application client id, service principal password and tenant id separated by commas.";
+                    }
+            }
+
+            return "I'm sorry. I did not understand you.";
+        }
+
+        private Tuple<string, string, string> ExtractCredentials(string activityText)
+        {
+            var subStrings = activityText.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (subStrings.Length == 3)
+            {
+                return new Tuple<string, string, string>(subStrings[0], subStrings[1], subStrings[2]);
+            }
+
+            return null;
+        }
+
+        private async Task<string> PrepareSubscriptionsResponse(Tuple<string, string, string> creds)
+        {
+            string requestURL = String.Format("https://smarm.azurewebsites.net/api/arm/GetSubscriptions?clientId={0}&clientSecret={1}&tenantId={2}",
+                                HttpUtility.UrlEncode(creds.Item1),
+                                HttpUtility.UrlEncode(creds.Item2),
+                                HttpUtility.UrlEncode(creds.Item3));
+
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(requestURL);
+            request.Headers.Add(HttpRequestHeader.Authorization, "Basic YXBpOnNlY3JldDEyMyFAIw==");
+            request.ContentType = "application/json";
+
+            string responseString = null;
+            using (HttpWebResponse response = (HttpWebResponse)await request.GetResponseAsync())
+            {
+                Stream responseStream = response.GetResponseStream();
+                using (StreamReader rdr = new StreamReader(responseStream, Encoding.UTF8))
+                {
+                    responseString = rdr.ReadToEnd();
+                }
+            }
+
+            JObject responseDoc = JObject.Parse(responseString);
+
+            StringBuilder builder = new StringBuilder();
+            foreach (var item in responseDoc["value"] as JArray)
+            {
+                JObject subDoc = item as JObject;
+                builder.AppendLine(string.Format("SubscriptionId: {0}, DisplayName:{1}", subDoc["subscriptionId"], subDoc["displayName"]));
+            }
+
+            return builder.ToString();
+        }
+
 
         private Activity HandleSystemMessage(Activity message)
         {
