@@ -71,6 +71,21 @@ namespace Azbot
                         stateClient.BotState.SetPrivateConversationData(activity.ChannelId, activity.Conversation.Id, activity.From.Id, state);
                         return "Sure. Please enter your AD application client id, service principal password and tenant id separated by commas.";
                     }
+                case "Thanks":
+                    return "My pleasure.";
+                case "DefaultSubscription":
+                    var subscriptionId = luisResponse.entities[0].entity.Replace(" ", "");
+                    state.SetProperty<string>("DefaultSubscription", subscriptionId);
+                    stateClient.BotState.SetPrivateConversationData(activity.ChannelId, activity.Conversation.Id, activity.From.Id, state);
+                    return "Subscription [" + subscriptionId + "] is set as the default subscription.";
+                case "ListResourceGroups":
+                    var defaultSubscription = state.GetProperty<string>("DefaultSubscription");
+                    var credentials = state.GetProperty<Tuple<string, string, string>>("ServicePrincipalCredentials");
+                    if (string.IsNullOrWhiteSpace(defaultSubscription) || credentials == null)
+                    {
+                        return "Please set a default subscription.";
+                    }
+                    return await PrepareResourceGroupsResponse(credentials, defaultSubscription);
                 default:
                     break;
             }
@@ -120,6 +135,44 @@ namespace Azbot
                                 HttpUtility.UrlEncode(creds.Item2),
                                 HttpUtility.UrlEncode(creds.Item3));
 
+            JObject responseDoc = await GetResponse(requestURL);
+
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("Your subscriptions:   ");
+
+            foreach (var item in responseDoc["value"] as JArray)
+            {
+                JObject subDoc = item as JObject;
+                builder.AppendLine(string.Format("SubscriptionId: {0}, DisplayName:{1}", subDoc["subscriptionId"], subDoc["displayName"]));
+            }
+
+            return builder.ToString();
+        }
+
+        private async Task<string> PrepareResourceGroupsResponse(Tuple<string, string, string> creds, string subscriptionId)
+        {
+            string requestURL = String.Format("https://smarm.azurewebsites.net/api/arm/GetResourceGroups?clientId={0}&clientSecret={1}&tenantId={2}&subscriptionId={3}",
+                                HttpUtility.UrlEncode(creds.Item1),
+                                HttpUtility.UrlEncode(creds.Item2),
+                                HttpUtility.UrlEncode(creds.Item3),
+                                HttpUtility.UrlEncode(subscriptionId));
+
+            JObject responseDoc = await GetResponse(requestURL);
+
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("Your resource groups:    ");
+
+            foreach (var item in responseDoc["value"] as JArray)
+            {
+                JObject subDoc = item as JObject;
+                builder.AppendLine(string.Format("Name: {0}", subDoc["name"]));
+            }
+
+            return builder.ToString();
+        }
+
+        private static async Task<JObject> GetResponse(string requestURL)
+        {
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(requestURL);
             request.Headers.Add(HttpRequestHeader.Authorization, "Basic YXBpOnNlY3JldDEyMyFAIw==");
             request.ContentType = "application/json";
@@ -135,17 +188,8 @@ namespace Azbot
             }
 
             JObject responseDoc = JObject.Parse(responseString);
-
-            StringBuilder builder = new StringBuilder();
-            foreach (var item in responseDoc["value"] as JArray)
-            {
-                JObject subDoc = item as JObject;
-                builder.AppendLine(string.Format("SubscriptionId: {0}, DisplayName:{1}", subDoc["subscriptionId"], subDoc["displayName"]));
-            }
-
-            return builder.ToString();
+            return responseDoc;
         }
-
 
         private Activity HandleSystemMessage(StateClient stateClient, Activity activity)
         {
