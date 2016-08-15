@@ -1,12 +1,9 @@
 ﻿using System;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Web.Http;
-using System.Web.Http.Description;
 using Microsoft.Bot.Connector;
-using Newtonsoft.Json;
 
 namespace Azbot
 {
@@ -21,18 +18,29 @@ namespace Azbot
         {
             if (activity.Type == ActivityTypes.Message)
             {
+                LuisResponse luisResponse = await LuisClient.ParseUserInput(activity.Text);
+                string botResponse = "I'm sorry. I did not understand you.";
                 ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
-                // calculate something for us to return
-                int length = (activity.Text ?? string.Empty).Length;
+                switch (luisResponse.intents[0].intent)
+                {
+                    case "Greet":
+                        botResponse = "Hi there. How can I help you today?";
+                        break;
+                    case "ListSubscriptions":
+                        botResponse = "Sure. Please enter your AD application ClientId, service principal password and tenant id.";
+                        break;
+                    default:
+                        break;
+                }
 
-                // return our reply to the user
-                Activity reply = activity.CreateReply($"You sent {activity.Text} which was {length} characters");
+                Activity reply = activity.CreateReply(botResponse);
                 await connector.Conversations.ReplyToActivityAsync(reply);
             }
             else
             {
                 HandleSystemMessage(activity);
             }
+
             var response = Request.CreateResponse(HttpStatusCode.OK);
             return response;
         }
